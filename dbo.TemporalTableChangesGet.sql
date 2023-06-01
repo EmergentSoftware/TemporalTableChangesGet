@@ -16,6 +16,8 @@ GO
 **  Grouping the output results in the user interface by the ChangeTime column would keep all the column changes 
 **  that occurred at the same time together.
 **
+**  There is a section below named "Approved tables to query" that allows you to limit the tables approved to be queried.
+**
 ** Performance
 **  If you do not set the @PrimaryKeyValue parameter, you will scan the entire current table.
 **
@@ -30,7 +32,10 @@ GO
 **  See comments to the right of the parameters below.
 **  
 ** Portions of this code are part of project sp_CRUDGen and are provided under the MIT license:
-** https://github.com/kevinmartintech/sp_CRUDGen 
+**  https://github.com/kevinmartintech/sp_CRUDGen 
+**
+** Checkout the sp_CRUDGen GitHub repo for a future generation of a '[TableName]ChangesGet' stored procedures.
+**
 **********************************************************************************************************************/
 CREATE OR ALTER PROCEDURE dbo.TemporalTableChangesGet (
     @SchemaTableName                       nvarchar(257)                   /* This is a required parameter in the form of SchemaName.TableName */
@@ -55,6 +60,35 @@ AS
         SET NOCOUNT, XACT_ABORT ON;
 
         /**********************************************************************************************************************
+        ** Approved tables to query 
+        **  Add schema and table names to the #ApprovedTablesToQuery table that you like would to allow with the commented out 
+        **  INSERT sample code below.
+        ** 
+        ** It is recommended to limit the tables you allow, even better create a stored procedure for each table with the 
+        ** @Debug = 1 parameter to create the majority of TSQL code for you. Checkout the sp_CRUDGen GitHub repo for a future 
+        ** generation of a '[TableName]ChangesGet' stored procedures.
+        **********************************************************************************************************************/
+        CREATE TABLE #ApprovedTablesToQuery (SchemaTableName nvarchar(257) NULL);
+        /* INSERT INTO #ApprovedTablesToQuery (SchemaTableName) VALUES (N'dbo.SomeTable'), (N'dbo.AnotherTable') */
+
+        IF EXISTS (SELECT * FROM #ApprovedTablesToQuery HAVING COUNT(*) > 0)
+        AND NOT EXISTS (
+            SELECT * FROM #ApprovedTablesToQuery WHERE SchemaTableName = @SchemaTableName
+        )
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT * FROM #ApprovedTablesToQuery WHERE SchemaTableName = @SchemaTableName
+                )
+                    BEGIN
+                        ; THROW 52001, 'The table is not in the approved tables to query list!', 1;
+                    /* Use RAISERROR below if you do not need a hard error thrown.
+                    RAISERROR(N'The table is not in the approved tables to query list!', 1, 1) WITH NOWAIT;
+                    RETURN -1;*/
+                    END;
+            END;
+
+
+        /**********************************************************************************************************************
         ** Check if version is 2016 or greater to support LAG(), OPENJSON, THROW
         **********************************************************************************************************************/
         IF @@VERSION LIKE '%Microsoft SQL Server 2000%'
@@ -64,6 +98,9 @@ AS
         OR @@VERSION LIKE '%Microsoft SQL Server 2014%'
             BEGIN
                 ; THROW 52001, 'SQL Server 2012 or greater is required!', 1;
+            /* Use RAISERROR below if you do not need a hard error thrown.
+            RAISERROR(N'SQL Server 2012 or greater is required!', 1, 1) WITH NOWAIT;
+            RETURN -1;*/
             END;
 
 
@@ -105,6 +142,7 @@ AS
         DECLARE @PreviousCharacter nchar(1);
         DECLARE @CurrentCharacter nchar(1);
         DECLARE @NextCharacter nchar(1);
+
 
         /**********************************************************************************************************************
         ** Set varibles
@@ -402,6 +440,7 @@ AS
         WHERE
             IsRowUpdateTable = 1;
 
+
         /**********************************************************************************************************************
         ** Create and load column list
         **********************************************************************************************************************/
@@ -557,7 +596,6 @@ AS
             TL.TableListId ASC
            ,C.column_id ASC
         OPTION (RECOMPILE);
-
 
 
         /**********************************************************************************************************************
@@ -744,7 +782,7 @@ AS
             BEGIN
                 SET @TemporalWithQueryWhere = N'
         WHERE
-            ' + @PrimaryKeyTableColumn + N' = ' + @PrimaryKeyValue;
+            ' + @PrimaryKeyTableColumn + N' = @PrimaryKeyValue';
             END;
 
 
@@ -877,6 +915,9 @@ Copy just the T-SQL below this block comment into a new query window to execute.
             END;
         ELSE
             BEGIN
-                EXEC sys.sp_executesql @stmt = @ExecuteChangesGetString;
+                EXEC sys.sp_executesql
+                    @stmt = @ExecuteChangesGetString
+                   ,@params = N'@PrimaryKeyValue nvarchar(MAX)'
+                   ,@PrimaryKeyValue = @PrimaryKeyValue;
             END;
     END;
